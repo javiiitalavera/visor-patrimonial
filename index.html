@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Visor Patrimonial v3.7</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="xlsx.full.min.js"></script>
+  <script>if (!window.XLSX) { const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; document.head.appendChild(s); }</script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <div class="logo">💎</div>
+    <div class="txt">
+      <div class="title">Visor Patrimonial <span class="version-badge">v3.7</span></div>
+      <div class="sub">Lectura por etiqueta · Desglose RV/RF/Cash/Fijos · Montecarlo 2000 iter · Hasta: <span id="kThrough">—</span></div>
+    </div>
+  </div>
+  <div class="passive-clock-container">
+    <div class="clock-info">
+      <div class="clock-left">
+        <span class="k-label">Cobertura de gastos vía rentas</span>
+        <div class="clock-tools">
+          <label class="mini-label" for="coverageWindow">Ventana:</label>
+          <select id="coverageWindow" class="mini-select">
+            <option value="12" selected>12m</option>
+            <option value="24">24m</option>
+          </select>
+        </div>
+      </div>
+      <span id="kPassivePct" class="k-val-small">0%</span>
+    </div>
+    <div class="gauge-bar"><div id="gaugeFill" class="gauge-fill"></div></div>
+    <div class="clock-footer"><span id="kPassiveStatus">Esperando datos...</span></div>
+  </div>
+  <div class="right">
+    <button id="btnClearCache" class="btn ghost" type="button" style="display:none;margin-right:8px;">🗑 Caché</button>
+    <button id="btnData" class="btn secondary" type="button" style="margin-right:10px;">📋 Ver datos</button>
+    <label class="btn primary"><input id="file" type="file" accept=".xlsx,.xls" hidden />📂 Cargar Excel</label>
+  </div>
+</header>
+
+<main class="main">
+  <nav class="tabs" id="tabContainer" style="display:none;">
+    <button class="tab-btn active" data-tab="tab-evolucion">Evolución y Estilo de Vida</button>
+    <button class="tab-btn" data-tab="tab-inversion">Rendimiento y Benchmarks</button>
+    <button class="tab-btn" data-tab="tab-desglose">Desglose de Cartera</button>
+    <button class="tab-btn" data-tab="tab-fire">Simulación FIRE</button>
+  </nav>
+
+  <div id="status" class="status-box">
+    <div class="icon-big">📊</div>
+    <h3>Panel de Control Desconectado</h3>
+    <p>Carga <strong>Cuentas.xlsx</strong> para procesar el histórico.</p>
+    <div class="debug-panel">
+      <strong>Motor v3.7 — lectura por etiqueta + desglose de activos:</strong><br>
+      • Ingresos / Gastos / Ahorro → 1ª ocurrencia en bloque Resumen<br>
+      • Patrimonio → fila con el año como etiqueta (2024, 2025…)<br>
+      • Total invertido → etiqueta exacta<br>
+      • Desglose: RV / RF / Cash / Fijos (configurable) · Deuda resta automáticamente
+    </div>
+  </div>
+
+  <div id="dashboard" style="display:none;">
+
+    <!-- TAB 1: Evolución -->
+    <section id="tab-evolucion" class="tab-content active">
+      <div class="kpi-grid">
+        <div class="kpi-card"><span class="k-label">Patrimonio Neto Actual</span><span id="kTotal" class="k-val">—</span></div>
+        <div class="kpi-card"><span class="k-label">Ahorro Medio Mensual (12m)</span><span id="kAvgSave" class="k-val">—</span></div>
+        <div class="kpi-card"><span class="k-label">Tasa de Ahorro Real</span><span id="kSaveRate" class="k-val">—</span></div>
+        <div class="kpi-card"><span class="k-label">Multiplicador FIRE (Regla 4%)</span><span id="kFireMult" class="k-val">—</span></div>
+      </div>
+      <div class="chart-wrapper"><h4 class="chart-title">Velocidad de Libertad: Días de vida comprados cada mes</h4><canvas id="freedomChart"></canvas></div>
+      <div class="chart-wrapper"><h4 class="chart-title">Lifestyle Creep: Ingresos vs Gastos mensuales</h4><canvas id="creepChart"></canvas></div>
+      <div class="chart-wrapper"><h4 class="chart-title">Evolución Patrimonial vs Invertido vs Ahorro Acumulado</h4><canvas id="mainChart"></canvas></div>
+    </section>
+
+    <!-- TAB 2: Inversión -->
+    <section id="tab-inversion" class="tab-content">
+      <div class="chart-wrapper highlight-chart"><h4 class="chart-title">Alpha: Cartera Real vs Benchmarks 6%, 7% y 8%</h4><canvas id="alphaChart"></canvas></div>
+      <div class="range-bar">
+        <div class="range-left">
+          <span class="mini-label">Intervalo:</span>
+          <select id="rangePreset" class="mini-select">
+            <option value="all" selected>Todo</option><option value="6">Últimos 6m</option>
+            <option value="12">Últimos 12m</option><option value="24">Últimos 24m</option>
+            <option value="custom">Rango libre</option>
+          </select>
+          <div id="customRange" class="custom-range" style="display:none;">
+            <span class="mini-label">Desde:</span><select id="rangeFrom" class="mini-select"></select>
+            <span class="mini-label">Hasta:</span><select id="rangeTo" class="mini-select"></select>
+          </div>
+        </div>
+        <div class="range-right">
+          <span class="mini-label">Ventana rentabilidad móvil:</span>
+          <select id="rollingWindow" class="mini-select">
+            <option value="3">3m</option><option value="6">6m</option>
+            <option value="12" selected>12m</option><option value="24">24m</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="chart-wrapper"><h4 class="chart-title">% del Patrimonio Invertido</h4><canvas id="invShareChart"></canvas></div>
+        <div class="chart-wrapper"><h4 class="chart-title">Rentabilidad Móvil de la Cartera</h4><canvas id="rollingReturnChart"></canvas></div>
+      </div>
+      <div class="grid-2">
+        <div class="chart-wrapper"><h4 class="chart-title">Rentabilidad Absoluta (€)</h4><canvas id="yieldChart"></canvas></div>
+        <div class="chart-wrapper"><h4 class="chart-title">Análisis de Drawdown</h4><canvas id="drawdownChart"></canvas></div>
+      </div>
+    </section>
+
+    <!-- TAB 3: Desglose -->
+    <section id="tab-desglose" class="tab-content">
+      <div class="breakdown-header">
+        <h3 class="section-title">Composición del Patrimonio por Clase de Activo</h3>
+        <button id="btnConfigCatMap" class="btn secondary" type="button">⚙️ Configurar mapeado</button>
+      </div>
+      <div id="breakdownKPIs" class="kpi-grid" style="margin-bottom:2rem;"></div>
+      <div class="grid-2" style="margin-bottom:1.5rem;">
+        <div class="chart-wrapper" style="height:420px;">
+          <h4 class="chart-title">Composición actual</h4>
+          <canvas id="donutChart"></canvas>
+        </div>
+        <div class="chart-wrapper" style="height:340px;">
+          <h4 class="chart-title">% por clase histórico</h4>
+          <canvas id="classPctChart"></canvas>
+        </div>
+      </div>
+      <div class="chart-wrapper" style="height:420px;">
+        <h4 class="chart-title">Evolución histórica de activos apilados</h4>
+        <canvas id="stackAreaChart"></canvas>
+      </div>
+    </section>
+
+    <!-- TAB 4: FIRE -->
+    <section id="tab-fire" class="tab-content">
+      <div class="fire-header">
+        <div class="fire-controls">
+          <div class="input-group">
+            <label>Rentabilidad Proyectada Anual (%):</label>
+            <input type="number" id="fireReturn" value="6.0" step="0.5" min="0" max="20">
+          </div>
+          <button id="btnRecalcFire" class="btn secondary" type="button">🔄 Recalcular</button>
+        </div>
+        <div class="fire-info-box"><p>Simulación basada en tu <strong>volatilidad real histórica</strong> — 2.000 iteraciones, abanico P5/P25/P50/P75/P95.</p></div>
+      </div>
+      <div id="fireStats" class="fire-stats-bar"></div>
+      <div class="chart-wrapper" style="height:550px;">
+        <h4 class="chart-title">Proyección Montecarlo: Abanico de Probabilidades (20 años)</h4>
+        <canvas id="fireChart"></canvas>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<!-- Modal datos -->
+<div id="dataModal" class="modal" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-modal="true">
+    <div class="modal-header">
+      <div><div class="modal-title">Datos (últimos 36 meses)</div><div class="modal-sub">Solo lectura.</div></div>
+      <div class="modal-actions">
+        <button id="btnExportCsv" class="btn secondary">⬇️ CSV</button>
+        <button id="btnCloseModal" class="btn ghost">✕</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="table-wrap">
+        <table id="dataTable" class="data-table">
+          <thead><tr><th>Mes</th><th>Ingresos</th><th>Gastos</th><th>Ahorro mes</th><th>Rinv (€)</th><th>Invertido</th><th>Patrimonio</th><th>Drawdown</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal configuración catmap -->
+<div id="catMapModal" class="modal" aria-hidden="true">
+  <div class="modal-card" style="max-width:600px;" role="dialog" aria-modal="true">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">⚙️ Configurar mapeado de activos</div>
+        <div class="modal-sub">Escribe las etiquetas de tu Excel separadas por coma, tal como aparecen en columna A.</div>
+      </div>
+      <button id="btnCancelCatMap" class="btn ghost">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="catMapForm" class="catmap-form"></div>
+      <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #30363d;font-size:0.8rem;color:#8b949e;">
+        Si un activo tiene valor negativo en el Excel (ej: "Deuda Ocean" = -500), inclúyelo en la clase correspondiente — su negativo reducirá el total automáticamente.<br>
+        Los cambios se guardan en el navegador y se aplican al recargar el Excel.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button id="btnSaveCatMap" class="btn primary">💾 Guardar y aplicar</button>
+      <button id="btnCancelCatMap2" class="btn ghost" onclick="document.getElementById('catMapModal').classList.remove('open')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<footer class="system-footer"><div id="debug-log">Log del sistema: Listo.</div></footer>
+<script src="app.js"></script>
+</body>
+</html>
